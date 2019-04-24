@@ -1,0 +1,764 @@
+/*
+ * Team Id:          1743
+ * Author List :     Lovish Mehta
+ * Theme :           Thirsty Crow
+ * Functions:        pinMode(),analogWrite(),digitalWrite(),Serial.begin(),Serial.read(),Serial.write(),setup(),loop(),encoder_init(),encoder_interrupt_init1(),encoder(char x),
+ *                   encoderf_b(char y),encoder_straight(),encoder_zero(),line_follow,readline(),turn_left(),turn_right(),xbee(),pebble(),buzzer(), 
+ 
+ * Global Variables: data1,data2,dat3,Dcounter,DcounterR,_lastValue,coun,flag,serial,right_anti, right clock, left_clock, left_anti.              
+ */
+
+
+#define F_CPU 14745600
+#define right_anti 6      //This Variable is used for antiClockwise rotation of right Wheel and this variable is assigned to pin PH3
+#define right_clock 5     //This Variable is used for Clockwise rotation of right Wheel and this variable is assigned to pin PE3
+#define left_clock 10     //This Variable is used for Clockwise rotation of left Wheel and this variable is assigned to pin PB4  
+#define left_anti 11      //This Variable is used for antiClockwise rotation of left Wheel and this variable is assigned to pin PB5
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+int data,data1,data2,data3;     // These vartiables are used to store the data of left,middle & right IR sensor 
+int Dcounter =0;               // Dcounter is used as a counter variable to keep count values of pulses of encoder whenever ISR of external interrupt 4 is called.
+int DcounterR =0;              // DcounterR is used as a counter variable to keep count values of pulses of encoder whenever ISR of external interrupt 5 is called.
+int _lastValue=0;              // This variable keep the last value detected by IR sensor while line following in case it gets out of the track or detect all white condition 
+int coun=0;                    // This variable is used in pebble function and used to keep the count so as to keep the track when to pick and when to drop the pebble
+int flag =0;                   // Variable is used as a flag in main loop function while whole of the path array is not recieved it remains 0 and robot does not start line following
+int serial =0;                 //It is used in Xbee function to keep the count ,that which serial data to be sent to python script when the bot reaches aruco object
+char directions[200];          //  array to store directions
+/*
+ * Function Name : pinMode()
+ * Input:          Pin number & Mode whether Output or Input
+ * Output:         Makes the mentioned pin as Input or OUTPUT
+ * Logic :         It perform its function by pulling up or pulling down the resister corresponding to that particular pin. Also it Writes to 0 or 1 to DDRx register corresponding 
+ *                 to that pin.
+ *Example:         pinMode(6,OUTPUT) :- this will make PH3 pin to act as OUTPUT Pin.             
+ *
+ */
+
+ /*
+ * Function Name : analogRead()
+ * Input:          Pin number of Analog Pin
+ * Output:         Nothing
+ * Logic :         Reads the the Analog data from that pin
+ *Example:         analogRead(A3) :- this will read analog data available at Pin PF3              
+ *
+ */
+
+  /*
+ * Function Name : analogWrite()
+ * Input:          Pin number of Pin & value from 0 to 255
+ * Output:         gives analog output on the pin
+ * Logic :         The pin gives the output in the analog form 
+ *Example:         analogWrite(6,100) :- this will output in the form of pwm which can be used to operate motors              
+ *
+ */
+
+  /*
+ * Function Name : Serial.begin()
+ * Input:          baudRate
+ * Output:         Nothing
+ * Logic :         initialize the Serial Communication
+ *Example:         Serial.begin(9600) : this initializes Serial communication with baud rate of 9600              
+ *
+ */
+
+   /*
+ * Function Name : Serial.write()
+ * Input:          data which you want to write to the Tx pin or want to send to any communication device
+ * Output:         Nothing
+ * Logic :         It just sends the data to the TX pin of the avr board and further that is transmitted
+ *Example:         Serial.write('c')            
+ *
+ */
+
+  /*
+ * Function Name : Serial.read()
+ * Input:          Nothing
+ * Output:         Gives the data recievd at RX pin of the AVR board
+ * Logic :         It just takes the data from the RX pin and provide to the user 
+ *Example:         int xbee = Serial.read() : this will store recieved data in the xbee variable            
+ *
+ */
+
+  /*
+ * Function Name : setup()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This function is generally used for the initialization purpose. Whatever Written in this function Runs for One time only.
+ *Example:         setup()             
+ *
+ */
+void setup()
+{
+  Serial.begin(9600);
+   
+char l,r,a,c,f,B,b,L,R,S;
+  pinMode(A3,INPUT);   //PF3
+  pinMode(A4,INPUT);   //PF4
+  pinMode(A5,INPUT);   //PF5
+  pinMode(6,OUTPUT);   
+  pinMode(5,OUTPUT);
+  pinMode(10,OUTPUT);
+  pinMode(11,OUTPUT);
+ 
+  encoder_init();
+
+ 
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /*
+ * Function Name : encoder_init()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtion initializes the Encoder by Writting to Pin 4  of PORT E & Pin 5 of PORT H
+ *Example:         encoder_init()           
+ *
+ */
+void encoder_init()
+{
+DDRE = DDRE &0xEF; // 0b11101111 Pin 4 of Port E is input
+PORTE = PORTE | 0x10; // 0b00010000 Pin 4 of Port E is pulled up
+DDRE = DDRE &0b11011111; // 0b11011111 Pin 5 of Port E is input
+PORTE = PORTE | 0x0b00100000; // 0b0010000 Pin 5 of Port E is pulled up
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /*
+ * Function Name : encoder_interrupt_init1()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtion initializes the External Interrupt for the Encoder . In this we initialize the External interrupt 4 and 5.
+ *Example:         encoder_interrupt_init1()           
+ *
+ */
+void encoder_interrupt_init1()
+{
+  cli();   // clear I bit of SREG i.e. Globally disable all interrupts
+  EICRB = EICRB | 0X02; // 0b00000010 (10) it will ser Interrupt Sense Control bits of INT4 for FALLING EDGE Detction
+  EIMSK = EIMSK | 0x10 ; //0b00010000 Setting(MAsking) INT4 bit in External interrupt MAsk Registeer
+  EICRB = EICRB | 0b00001000; // 0b0000100 (10) it will ser Interrupt Sense Control bits of INT5 for FALLING EDGE Detction
+  EIMSK = EIMSK | 0b00100000 ; //0b00100000 Setting(MAsking) INT5 bit in External interrupt MAsk Registeer
+  sei();  //Set I bit of SREG
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /*
+ * Function Name : ISR
+ * Input:          Interrupt Vector 
+ * Output:         Nothing
+ * Logic :         This funtion initializes ISR for the particular Interrupt. Whenevr INT flag is set this service routine is called automatically
+ *Example:        ISR(INT4_vect): initializes interrupt Service routine for External Pin 4          
+ *
+ */
+ISR(INT4_vect)
+{
+  
+  Dcounter = Dcounter+1;           // Incrementing the Dcounter Whenever the ISR of External interrupt of pin 4 is called. Dcounter Stores the pulses fed at INT4 pin
+  //Serial.println(Dcounter);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ISR(INT5_vect)
+{
+  
+  DcounterR = DcounterR+1;      //// Incrementing the DcounterR Whenever the ISR of External interrupt of pin 4 is called. DcounterR Stores the pulses fed at INT5 pin
+  
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//NOTE : ENCODER functions are created related to different steps required at different conditions by the robot some makes robot move 220 pulses forward and some makes robot move 380 pulses forward
+   /*
+ * Function Name : encoder( )
+ * Input:          character
+ * Output:         Nothing
+ * Logic :         This funtion takes character as input and on the basis of input character decided the movement of encoders i.e. for how much pulses will the wheels rotate.
+ *                 This function deals with the  anticlockwise and Clockwise movement of bot using encoders 
+ *Example:         encoder('a')           
+ *
+ */
+void encoder(char dir)
+{
+analogWrite(left_anti,0);             // Making the speed of motors Zero 
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+    delay(1000);
+ 
+     if(dir =='a')                   // if Character Recieved is equal to 'a' then rotate anti_clockwise for 510 pulses
+  {
+    while(1)
+    {
+  if(DcounterR<=510)
+{
+ 
+  analogWrite(left_anti,100);
+  analogWrite(right_clock,100);
+}
+else
+  {DcounterR=0;
+   Dcounter=0;
+    break;
+  }
+  }
+  }
+ else if(dir =='c')       //if Character Recieved is equal to 'c' then rotate clockwise for 510 pulses
+   {
+while(1)
+{
+if(Dcounter<=510)
+{
+ 
+  analogWrite(left_clock,100);
+  analogWrite(right_anti,100);
+}
+  
+  else 
+  {
+    DcounterR=0;
+   Dcounter=0;
+    break;
+    
+  }
+   }
+   }
+  
+analogWrite(left_anti,0);             // making the motors speed again = 0
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ /*
+ * Function Name : encoderf_b( )
+ * Input:          character
+ * Output:         Nothing
+ * Logic :         This funtion works same as above function just the difference is that it controls the forward ,  backward and 180 degree of movement of bot using encoders
+ *                 
+ *Example:         encoderf_b('f')           
+ *
+ */
+
+void encoderf_b(char d)
+{
+  analogWrite(left_anti,0);                   // Stopping the motos by making their speed s equal to zero
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+    delay(1000);
+  
+    if(d =='F')                              // if character 'F' is recievd move forward for 140 pulses
+  {
+    while(1)
+    {
+  if(DcounterR<=140)
+{
+ 
+  analogWrite(left_clock,100);
+  analogWrite(right_clock,100);
+}
+else
+  {DcounterR=0;            
+   Dcounter=0;
+    break;
+  }
+  }
+  }
+    else if(d =='f')                // if character 'f' is recievd move forward for 220 pulses
+  {
+    while(1)
+    {
+  if(DcounterR<=220)
+{
+ 
+  analogWrite(left_clock,100);
+  analogWrite(right_clock,100);
+}
+else
+  {DcounterR=0;
+   Dcounter=0;
+    break;
+  }
+  }
+  }
+  else if(d =='B')             // if character 'B' is recievd move backward for 220 pulses
+   {
+while(1)
+{
+if(Dcounter<=220)
+{
+
+ 
+  analogWrite(left_anti,100);
+  analogWrite(right_anti,100);
+}
+  
+  else 
+  {
+    DcounterR=0;
+   Dcounter=0;
+    break;
+    
+  }
+   }
+   }
+   else if(d =='b')                // if character 'b' is recievd rotate 180 for 700 pulses
+   {
+while(1)
+{
+if(DcounterR<=700)
+{
+ 
+
+  analogWrite(left_anti,100);
+  analogWrite(right_clock,100);
+}
+else
+  {
+  
+    
+
+    turn_left();
+    DcounterR=0;
+   Dcounter=0;
+    break;
+  }
+   }
+   }
+  
+analogWrite(left_anti,0);                 //Stopping motors
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /*
+ * Function Name : encoder_straight( )
+ * Input:          character
+ * Output:         Nothing
+ * Logic :         This funtion also works same as above two encoder function just the difference is that it controls the LONG forward &  backward  movement of bot using encoders
+ *                 whenever there is condition of 'S' , i.e to move straight. 
+ *Example:         encoder('B')           
+ *
+ */
+void encoder_straight(char cc)
+{
+    analogWrite(left_anti,0);
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+    delay(1000);
+   if(cc =='f')                                  //if character is equal to 'f' it will move 380 pulses forward
+  {
+    while(1)
+    {
+  if(DcounterR<=380)
+{
+ 
+  analogWrite(left_clock,100);
+  analogWrite(right_clock,100);
+}
+else
+  {DcounterR=0;
+   Dcounter=0;
+    break;
+  }
+  }
+  }
+  else if(cc =='B')                   // if character is equal to 'B' it move 380 pulses backward
+   {
+while(1)
+{
+if(Dcounter<=380)
+{
+
+ 
+  analogWrite(left_anti,100);
+  analogWrite(right_anti,100);
+}
+else
+  {DcounterR=0;
+   Dcounter=0;
+    break;
+  }
+  }
+  }
+   analogWrite(left_anti,0);                    //stopping the motors
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+* Function Name :  encoder_zero( )
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtion just reset the values of Dcounter and DcounterR to 0. 
+ *Example:         encoder_zero ()         
+ *
+ */
+void encoder_zero()
+{
+  Dcounter = 0;
+  DcounterR = 0;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+* Function Name : buzzer( )
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtions turns on the buzzer for 5 seconds and then stop the motors forever
+ * Example:        buzzer()            
+ *
+ */
+void buzzer()
+{
+   analogWrite(right_clock,0) ;
+      analogWrite(right_anti,0);
+      analogWrite(left_clock,0);
+      analogWrite(left_anti,0);
+  digitalWrite(33,HIGH);
+  delay(5000);
+  digitalWrite(33,LOW);
+  while(1)
+  {
+     analogWrite(left_anti,0);
+    analogWrite(right_clock,0);
+      analogWrite(left_clock,0);
+    analogWrite(right_anti,0);
+  }
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*
+* Function Name :readLine( )
+ * Input:          Nothing
+ * Output:         position of the ir sensor with respect to line .
+ * Logic :         If the robot goes to extreme right the position is maximum and if it goes to the extreme left position is 0;
+ * Example:        readLine()            
+ *
+ */
+int readline()
+{
+   unsigned char i, on_line = 0;
+    unsigned long avg; // this is for the weighted total, which is long                 // before division
+    unsigned int sum; // this is for the denominator which is <= 64000
+    avg = 0;
+    sum = 0;
+    int _numSensors=3;
+    int sensor_values[3];
+    sensor_values[0]=analogRead(A5);
+    sensor_values[1]=analogRead(A4);
+    sensor_values[2]=analogRead(A3);
+    for(i=0;i<_numSensors;i++) {
+        int value = sensor_values[i];
+        // keep track of whether we see the line at all
+        if(value > 800) {
+            on_line = 1;
+        }
+
+        // only average in values that are above a noise threshold
+        if(value > 50) {
+            avg += (long)(value) * (i * 1000);
+            sum += value;
+        }
+    }
+    _lastValue = avg/sum;
+    if(!on_line)
+    {
+        // If it last read to the left of center, return 0.
+        if(_lastValue < (_numSensors-1)*1000/2)
+            return 0;
+
+        // If it last read to the right of center, return the max.
+        else
+            return (_numSensors-1)*1000;
+    }
+     return _lastValue;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+* Function Name :line_follow()
+ * Input:          Nothing
+ * Output:         nothing
+ * Logic :         the functio controls the movement of the robot on a straight line with the help of the position values.It then calculates the relative error difference +(ve) or -(ve)
+ * accordingly it moves the robot left or right by reducing the speed of one motor and increasing the speed of other motor.
+ * Example:        readLine()            
+ *
+ */
+void line_follow()
+{ 
+int center=1000;
+int pos = readline();
+int error=pos-center;//calculating the relative error.
+if(error>-40&&error<40)
+{//if error is very small keep moving forward
+analogWrite(left_clock,110);
+analogWrite(right_clock,110);}
+else if(error>40)
+{//if errorr is positive and large robot has moved to the right and hence move to left to cancel the effect
+analogWrite(left_clock,110);
+  analogWrite(right_clock,30);
+  }
+  else if(error<-40)
+{//if errorr is negative and large robot has moved to the leftt and hence move to rightt to cancel the effect 
+ analogWrite(left_clock,30);
+  analogWrite(right_clock,110);
+ } 
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ /*
+* Function Name : turn_right()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtions is used for taking right turn by the bot . It turns right until the middle sensor of IR i.e is A4 does not gets black.
+ * Example:        turn_right()           
+ *
+ */
+
+void turn_right()
+{
+ analogWrite(left_clock,0);
+analogWrite(right_clock,0);
+analogWrite(left_anti,0);
+analogWrite(right_anti,0);
+data=analogRead(A5);
+   data1=analogRead(A4);
+   data2=analogRead(A3);
+
+while(analogRead(A4)<500)             // turning right unti the value of IR array middle sensor is less then 500 i.e. until its on white. When it detects black line it stops.
+{
+ analogWrite(left_clock,100);
+analogWrite(right_anti,100);
+  }analogWrite(right_anti,0);
+  analogWrite(left_clock,0);
+analogWrite(right_clock,0);
+ }
+
+ //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ /*
+* Function Name : turn_left()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtions is used for taking Left turn by the bot .It turns left() until the middle sensor of IR i.e is A4 does not gets black.
+ * Example:        turn_left()            
+ *
+ */
+void turn_left()
+{
+  analogWrite(left_clock,0);
+analogWrite(right_clock,0);
+analogWrite(left_anti,0);
+analogWrite(right_anti,0);
+data=analogRead(A5);
+
+   data1=analogRead(A4);
+   data2=analogRead(A3);
+
+while(analogRead(A4)<500)         // turning left unti the value of IR array middle sensor is less then 500 i.e. until its on white. When it detects black line it stops.
+{
+ analogWrite(left_anti,100);
+analogWrite(right_clock,100);
+  }analogWrite(left_anti,0);
+ 
+analogWrite(right_clock,0);
+  }
+ 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ /*
+* Function Name : pebble()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         This funtions is used to turn on ElcetroMagnet whenever there is Pebble Aruco_object resulting in Pebble pickup and it turns the ElectroMagnet off whener there is water_Pitcher  
+ *                 object resuting in Pebble drop.
+ * Example:        pebble()           
+ *
+ */
+
+void pebble()
+{
+   if(coun%2 ==0)
+     {
+      analogWrite(31,255);
+      delay(500);
+      coun++;
+     }
+     else
+     {
+      analogWrite(31,0);
+      delay(500);
+      
+      coun++;
+      
+     }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ /*
+* Function Name :  xbee()
+ * Input:          Nothing
+ * Output:         characters 'p' & 'w'
+ * Logic :         This function serially sends character 'p' whenevr bot reaches Aruco_pebble object and it send character 'w' whenever it reaches Aruco Water_pitcher object. 
+ *                 Logic used is of even and odd . whenever 'serial' variable is even the Aruco object is pebble and when its odd aruco object is water_pitcher.
+ * Example:        xbee()            
+ *
+ */
+void xbee()
+{
+  if(serial%2 == 0)
+  {
+    Serial.write('p');
+    serial++;
+  }
+  else
+  {
+    Serial.write('w');
+    serial++;
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ /*
+* Function Name :  loop()
+ * Input:          Nothing
+ * Output:         Nothing
+ * Logic :         Its a function which repeats itself forever
+ * Example:        loop()            
+ *
+ */
+void loop()
+{
+
+char characters;                        // Here we wait until all the directionsar not recieved. They are stored in direction[] array and when all of them are recieved 'flag' variable is set = 1  
+  while(!Serial.available()){}
+ characters=Serial.read();
+ if(characters=='w')
+{while(!Serial.available()){}
+  characters=Serial.read();
+  while(characters!='w')
+  {
+    directions[coun]=characters;
+    coun++;
+    while(!Serial.available()){}
+    characters=Serial.read();flag=1;
+   }
+   }
+
+int i=0;
+
+if(flag==1)
+{
+while(1)
+{                                                      //This part takes care of the traversal of the bot through the arena
+line_follow();
+   data1=digitalRead(A3);
+ data2=analogRead(A5);
+ data3=analogRead(A4);
+ if(data1<500&&data2<500&&data3<500)
+ {
+  if(directions[i] == 'r')                            // If direction = r , turn right
+  {
+    turn_right();
+    i++;
+  }
+
+  else if (directions[i] == 'l')                     // If direction = l , turn leftt
+    {
+      turn_left();
+
+      i++;
+    }
+  else
+  { 
+    if(directions[i] == 'L')                        // If direction = L , turn left 120 degreee
+    {encoder_zero();
+      encoder_interrupt_init1();
+      encoderf_b('F');
+      encoder_interrupt_init1();
+      encoder('a');
+      encoder_interrupt_init1();
+      encoderf_b('f');
+      pebble();
+      xbee();
+      encoder_interrupt_init1();
+      encoderf_b('B');
+      analogWrite(right_clock,0) ;
+      analogWrite(right_anti,0);
+      analogWrite(left_clock,0);
+      analogWrite(left_anti,0);
+      delay(1000);
+      i++;
+    }
+   else if(directions[i] =='R')                     // If direction = R , turn right 120 degree
+    { encoder_zero();
+      encoder_interrupt_init1();
+      encoderf_b('F');
+      encoder_interrupt_init1();
+      encoder('c');
+      encoder_interrupt_init1();
+      encoderf_b('f');
+      pebble();
+      xbee();
+      encoder_interrupt_init1();
+      encoderf_b('B');
+      analogWrite(right_clock,0) ;
+      analogWrite(right_anti,0);
+      analogWrite(left_clock,0);
+      analogWrite(left_anti,0);
+      delay(1000);
+      i++;
+    }
+
+  else if(directions[i] =='S')                // If direction = S , go straight
+  {
+    encoder_zero();
+    encoder_interrupt_init1();
+    encoder_straight('f');
+   
+    pebble();
+      xbee();
+      
+      encoder_interrupt_init1();
+      
+      encoder_straight('B');     
+    i++;
+  }
+
+   
+  else if(directions[i] =='b')          // If direction = b , 180 degree
+  {  encoder_zero();
+     encoder_interrupt_init1();
+     encoderf_b('b');
+      analogWrite(right_clock,0) ;
+      analogWrite(right_anti,0);
+      analogWrite(left_clock,0);
+      analogWrite(left_anti,0);
+      delay(1000);
+      i++; 
+  }
+  else if(directions[i] =='s')
+  {
+    buzzer();// If reached the end,sound the buzzer for 5 seconds
+  }
+  }
+ }
+ }
+  }
+ }
+  
+ 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ 
+  
